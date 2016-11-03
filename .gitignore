@@ -1,9 +1,0 @@
-# cache
-__pycache__/
-
-# testing
-.cache/
-.tox
-
-# dist
-evotrees.egg-info/
