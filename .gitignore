@@ -1,0 +1,6 @@
+environment
+
+# pywikibot
+apicache/
+throttle.ctrl
+user-config.py
