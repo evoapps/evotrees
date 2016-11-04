@@ -1,4 +1,4 @@
-from py2neo import Node
+from py2neo import Node, Relationship
 
 from .util import hash_wikitext, parse_wikitext
 
@@ -29,3 +29,12 @@ class Wikitext(RevisionNode):
         self.data['plaintext'] = parse_wikitext(self.data['wikitext'])
 
         return super().to_node()
+
+
+class Edit:
+    def __init__(self, parent, child):
+        self.parent = parent
+        self.child = child
+
+    def to_relationship(self):
+        return Relationship(self.parent, 'CHANGED_TO', self.child)

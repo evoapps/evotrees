@@ -5,7 +5,7 @@ from py2neo import Node, Relationship, ConstraintError
 import unipath
 import pandas
 
-from .models import Revision, Wikitext
+from .models import Revision, Wikitext, Edit
 from .util import (connect_to_graph_db, assert_uniqueness_constraint,
                    get_wiki_page)
 
@@ -92,9 +92,13 @@ def import_articles(ctx, names, title_col='title', clear_all=False,
             # Right now existing articles are just being skipped:
             continue
 
+        # Create a root wikitext node
+        parent_wikitext = Wikitext(dict(text='')).to_node()
+        graph.create(parent_wikitext)
+
         # Create nodes for each of the article's revisions.
         # Also create preliminary relationships between article and revisions.
-        parent = None
+        parent_node = None
         for revision, wikitext in import_revisions_as_nodes(title):
             # All revisions should be unique
             try:
@@ -107,11 +111,13 @@ def import_articles(ctx, names, title_col='title', clear_all=False,
 
             graph.create(Relationship(article, 'CONTAINS', revision))
             graph.create(Relationship(revision, 'CHANGED_TO', wikitext))
+            graph.create(Relationship(parent_wikitext, 'EDIT', wikitext))
 
-            if parent:
-                graph.create(Relationship(parent, 'PARENT_OF', revision))
+            if parent_node:
+                graph.create(Relationship(parent_node, 'PARENT_OF', revision))
 
-            parent = revision
+            parent_node = revision
+            parent_wikitext = wikitext
 
         logger.info('Finished processing article: {}'.format(title))
 
