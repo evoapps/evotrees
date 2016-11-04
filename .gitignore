@@ -8,5 +8,8 @@ user-config.py
 # python
 __pycache__/
 
+# testing
+.cache/
+
 # os
 .DS_Store

@@ -1,4 +1,5 @@
 import logging
+import hashlib
 from os import environ
 
 from py2neo import Graph
@@ -20,3 +21,12 @@ def assert_uniqueness_constraint(graph, label, property_name):
         msg = 'Creating uniqueness constraint {}: {}'
         logger.info(msg.format(label, property_name))
         graph.schema.create_uniqueness_constraint(label, property_name)
+
+
+def hash_wikitext(text):
+    try:
+        btext = text.encode('utf-8')
+    except AttributeError:
+        btext = ''.encode('utf-8')
+        logger.info('Unable to encode wikitext to bytes')
+    return hashlib.sha224(btext).hexdigest()

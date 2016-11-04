@@ -1,4 +1,5 @@
 import logging
+import hashlib
 
 from invoke import task
 from py2neo import Node, Relationship, ConstraintError
@@ -6,7 +7,8 @@ import pywikibot
 import unipath
 import pandas
 
-from .util import connect_to_graph_db, assert_uniqueness_constraint
+from .util import (connect_to_graph_db, assert_uniqueness_constraint,
+                   hash_wikitext)
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +72,8 @@ def import_articles(ctx, names, title_col='title', clear_all=False,
     if clear_all:
         graph.delete_all()
     assert_uniqueness_constraint(graph, 'Article', 'title')
+    assert_uniqueness_constraint(graph, 'Revision', 'revid')
+    assert_uniqueness_constraint(graph, 'Wikitext', 'hash')
 
     for title in titles:
         logger.info('Start processing article: {}'.format(title))
@@ -82,14 +86,28 @@ def import_articles(ctx, names, title_col='title', clear_all=False,
             graph.create(article)
         except ConstraintError:
             logger.info('Article {} already exists'.format(title))
+            # TODO: Allow updating existing articles with new revisions.
+            # Right now existing articles are just being skipped:
             continue
 
         # Create nodes for each of the article's revisions.
         # Also create preliminary relationships between article and revisions.
         parent = None
-        for revision in import_revisions(title):
-            graph.create(revision)
+        for revision, wikitext in import_revisions(title):
+            # All revisions should be unique
+            try:
+                graph.create(revision)
+            except ConstraintError:
+                raise DuplicateRevisionError
+
+            # Wikitexts might not be unique
+            try:
+                graph.create(wikitext)
+            except ConstraintError:
+                wikitext = graph.find_one('Wikitext', 'hash', wikitext['hash'])
+
             graph.create(Relationship(article, 'CONTAINS', revision))
+            graph.create(Relationship(revision, 'CHANGED_TO', wikitext))
 
             if parent:
                 graph.create(Relationship(parent, 'PARENT_OF', revision))
@@ -98,13 +116,59 @@ def import_articles(ctx, names, title_col='title', clear_all=False,
 
 
 def import_revisions(title):
-    """Yield Wikipedia article revisions as py2neo Nodes."""
-    properties = ['revid', 'text']
+    """Yield Wikipedia article revisions as py2neo Nodes.
+
+    This generator returns tuples of (Revision, Wikitext) Node objects.
+
+    Each revision is split into two nodes: Revisions and Wikitexts. The reason
+    is that revisions and wikitext content are not equally unique. For example,
+    reverts are unique revisions (based on revid and Wikipedian author) but
+    they do not introduce any novel forms of the article wikitext content.
+
+    Right now revisions are downloaded from the live Wikipedia servers.
+    TODO: Allow importing revisions from other data sources, e.g., a Wikipedia
+          database dump.
+
+    Args:
+        title: The name of the article to import. Can be either title case
+            with spaces or a slug, with underscores. pywikibot doesn't seem
+            to care.
+    """
+    revision_properties = ['revid']
+    wikitext_properties = ['text']
 
     site = pywikibot.Site('en', 'wikipedia')
     page = pywikibot.Page(site, title)
 
     revisions = page.revisions(reverse=True, content=True)
     for revision in revisions:
-        data = {k: revision[k] for k in properties}
-        yield Node('Revision', **data)
+        revision_node = Revision(revision).to_node()
+        wikitext_node = Wikitext(revision).to_node()
+        yield (revision_node, wikitext_node)
+
+
+class RevisionNode:
+    def __init__(self, revision_data):
+        self.data = {k: revision_data[k] for k in self.REVISION_PROPERTIES}
+
+    def to_node(self):
+        return Node(self.NODE_LABEL, **self.data)
+
+
+class Revision(RevisionNode):
+    NODE_LABEL = 'Revision'
+    REVISION_PROPERTIES = ['revid']
+
+
+class Wikitext(RevisionNode):
+    NODE_LABEL = 'Wikitext'
+    REVISION_PROPERTIES = ['text']
+
+    def to_node(self):
+        # Derive additional node attributes
+        self.data['hash'] = hash_wikitext(self.data['text'])
+        return super().to_node()
+
+
+class DuplicateRevisionError(Exception):
+    """An unexpectedly duplicated revision was encountered."""
