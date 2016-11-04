@@ -3,6 +3,7 @@ import hashlib
 from os import environ
 
 from py2neo import Graph
+import pywikibot
 
 logger = logging.getLogger(__name__)
 
@@ -30,3 +31,9 @@ def hash_wikitext(text):
         btext = ''.encode('utf-8')
         logger.info('Unable to encode wikitext to bytes')
     return hashlib.sha224(btext).hexdigest()
+
+
+def get_wiki_page(title):
+    site = pywikibot.Site('en', 'wikipedia')
+    page = pywikibot.Page(site, title)
+    return page

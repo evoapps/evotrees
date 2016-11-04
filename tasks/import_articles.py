@@ -1,14 +1,13 @@
 import logging
-import hashlib
 
 from invoke import task
 from py2neo import Node, Relationship, ConstraintError
-import pywikibot
 import unipath
 import pandas
 
+from .models import Revision, Wikitext
 from .util import (connect_to_graph_db, assert_uniqueness_constraint,
-                   hash_wikitext)
+                   get_wiki_page)
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +42,7 @@ def import_articles(ctx, names, title_col='title', clear_all=False,
         (article) -[:CONTAINS]-> (revision)
         (revision) -[:PARENT_OF]-> (revision)
 
-    Args:
+    Command line args:
         names:
             Articles to import. Can be an article title or slug, a
             comma-separated list of article titles or slugs, the path to
@@ -52,7 +51,7 @@ def import_articles(ctx, names, title_col='title', clear_all=False,
             If names is a csv file, title col is the name of the
             column to use for article titles. Defaults to 'title'.
 
-    Flags:
+    Command line flags:
         clear_all:
             Should existing data be purged before importing new articles?
             Default is False.
@@ -76,7 +75,7 @@ def import_articles(ctx, names, title_col='title', clear_all=False,
     assert_uniqueness_constraint(graph, 'Wikitext', 'hash')
 
     for title in titles:
-        logger.info('Start processing article: {}'.format(title))
+        logger.info('Starting to process article: {}'.format(title))
         title = title.replace('_', ' ')  # convert any slugs to titles
 
         # Create a node for this article.
@@ -93,7 +92,7 @@ def import_articles(ctx, names, title_col='title', clear_all=False,
         # Create nodes for each of the article's revisions.
         # Also create preliminary relationships between article and revisions.
         parent = None
-        for revision, wikitext in import_revisions(title):
+        for revision, wikitext in import_revisions_as_nodes(title):
             # All revisions should be unique
             try:
                 graph.create(revision)
@@ -114,8 +113,10 @@ def import_articles(ctx, names, title_col='title', clear_all=False,
 
             parent = revision
 
+        logger.info('Finished processing article: {}'.format(title))
 
-def import_revisions(title):
+
+def import_revisions_as_nodes(title):
     """Yield Wikipedia article revisions as py2neo Nodes.
 
     This generator returns tuples of (Revision, Wikitext) Node objects.
@@ -134,12 +135,7 @@ def import_revisions(title):
             with spaces or a slug, with underscores. pywikibot doesn't seem
             to care.
     """
-    revision_properties = ['revid']
-    wikitext_properties = ['text']
-
-    site = pywikibot.Site('en', 'wikipedia')
-    page = pywikibot.Page(site, title)
-
+    page = get_wiki_page(title)
     revisions = page.revisions(reverse=True, content=True)
     for revision in revisions:
         revision_node = Revision(revision).to_node()
@@ -147,28 +143,5 @@ def import_revisions(title):
         yield (revision_node, wikitext_node)
 
 
-class RevisionNode:
-    def __init__(self, revision_data):
-        self.data = {k: revision_data[k] for k in self.REVISION_PROPERTIES}
-
-    def to_node(self):
-        return Node(self.NODE_LABEL, **self.data)
-
-
-class Revision(RevisionNode):
-    NODE_LABEL = 'Revision'
-    REVISION_PROPERTIES = ['revid']
-
-
-class Wikitext(RevisionNode):
-    NODE_LABEL = 'Wikitext'
-    REVISION_PROPERTIES = ['text']
-
-    def to_node(self):
-        # Derive additional node attributes
-        self.data['hash'] = hash_wikitext(self.data['text'])
-        return super().to_node()
-
-
 class DuplicateRevisionError(Exception):
-    """An unexpectedly duplicated revision was encountered."""
+    """An unexpected, duplicated revision was encountered."""
