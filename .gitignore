@@ -4,3 +4,9 @@ environment
 apicache/
 throttle.ctrl
 user-config.py
+
+# python
+__pycache__/
+
+# os
+.DS_Store
