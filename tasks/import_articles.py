@@ -70,13 +70,16 @@ def import_articles(ctx, names, title_col='title', clear_all=False,
     graph = connect_to_graph_db()
     if clear_all:
         graph.delete_all()
+
     assert_uniqueness_constraint(graph, 'Article', 'title')
     assert_uniqueness_constraint(graph, 'Revision', 'revid')
     assert_uniqueness_constraint(graph, 'Wikitext', 'hash')
 
     for title in titles:
         logger.info('Starting to process article: {}'.format(title))
-        title = title.replace('_', ' ')  # convert any slugs to titles
+
+        # Convert any slugs to titles
+        title = title.replace('_', ' ')
 
         # Create a node for this article.
         article = Node('Article', title=title)
@@ -100,10 +103,7 @@ def import_articles(ctx, names, title_col='title', clear_all=False,
                 raise DuplicateRevisionError
 
             # Wikitexts might not be unique
-            try:
-                graph.create(wikitext)
-            except ConstraintError:
-                wikitext = graph.find_one('Wikitext', 'hash', wikitext['hash'])
+            graph.merge(wikitext)
 
             graph.create(Relationship(article, 'CONTAINS', revision))
             graph.create(Relationship(revision, 'CHANGED_TO', wikitext))

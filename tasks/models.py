@@ -1,6 +1,6 @@
 from py2neo import Node
 
-from .util import hash_wikitext
+from .util import hash_wikitext, parse_wikitext
 
 
 class RevisionNode:
@@ -21,6 +21,11 @@ class Wikitext(RevisionNode):
     REVISION_PROPERTIES = ['text']
 
     def to_node(self):
+        # Rename text -> wikitext
+        self.data['wikitext'] = self.data.pop('text')
+
         # Derive additional node attributes
-        self.data['hash'] = hash_wikitext(self.data['text'])
+        self.data['hash'] = hash_wikitext(self.data['wikitext'])
+        self.data['plaintext'] = parse_wikitext(self.data['wikitext'])
+
         return super().to_node()

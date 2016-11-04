@@ -1,6 +1,7 @@
 invoke==0.13.0
 py2neo==3.1.2
 pywikibot==2.0rc5
+mwparserfromhell==0.4.3
 Unipath==1.1
 pandas==0.19.1
 pytest==3.0.3

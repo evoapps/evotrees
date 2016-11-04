@@ -4,6 +4,7 @@ from os import environ
 
 from py2neo import Graph
 import pywikibot
+import mwparserfromhell
 
 logger = logging.getLogger(__name__)
 
@@ -37,3 +38,7 @@ def get_wiki_page(title):
     site = pywikibot.Site('en', 'wikipedia')
     page = pywikibot.Page(site, title)
     return page
+
+
+def parse_wikitext(text):
+    return mwparserfromhell.parse(text).strip_code()
