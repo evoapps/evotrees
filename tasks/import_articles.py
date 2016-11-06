@@ -5,14 +5,31 @@ from py2neo import Node, Relationship, ConstraintError
 import unipath
 import pandas
 
-from .models import Revision, Wikitext, Edit
+from .models import Revision, Wikitext
 from .util import (connect_to_graph_db, assert_uniqueness_constraint,
                    get_wiki_page)
 
 logger = logging.getLogger(__name__)
 
+arg_docs = dict(
+    names=(
+        "Articles to import. Can be an article title or slug, a "
+        "comma-separated list of article titles or slugs, the path "
+        "to a csv of articles."
+    ),
+    title_col=(
+        "If names is a csv file, title col is the name of the "
+        "column to use for article titles. Defaults to 'title'."
+    ),
+    clear_all=(
+        "Should existing data be purged before importing new articles? "
+        "Default is False."
+    ),
+    verbose="Describe what's happening to figure out what went wrong."
+)
 
-@task
+
+@task(help=arg_docs)
 def import_articles(ctx, names, title_col='title', clear_all=False,
                     verbose=False):
     """Import Wikipedia articles into a Neo4j graph database.
@@ -34,29 +51,18 @@ def import_articles(ctx, names, title_col='title', clear_all=False,
         $ inv import_articles birds.csv
         $ inv import_articles birds.csv --title-col=slug
 
-    Articles are imported as nodes, and each revision is imported as it's own
-    node as well. Two preliminary relationships are created on import. The
-    first is the relationship between an article and it's revisions. The second
-    is the chronological relationship between revisions.
+    # Nodes and Relationships
 
-        (article) -[:CONTAINS]-> (revision)
-        (revision) -[:PARENT_OF]-> (revision)
+    Importing articles involves creating py2neo nodes for the article, each
+    revision that has been made to the article, each unique version of the
+    article wikitext (distinct from unique revisions due to reverts), and
+    any unique Wikipedians authoring the edits to this article.
 
-    Command line args:
-        names:
-            Articles to import. Can be an article title or slug, a
-            comma-separated list of article titles or slugs, the path to
-            a csv of articles.
-        title_col:
-            If names is a csv file, title col is the name of the
-            column to use for article titles. Defaults to 'title'.
-
-    Command line flags:
-        clear_all:
-            Should existing data be purged before importing new articles?
-            Default is False.
-        verbose:
-            Describe what's happening to figure out what went wrong.
+    1. (Article) -[CONTAINS]-> (Revision)
+    2. (Revision) -[PARENT_OF]-> (Revision)
+    3. (Revision) -[CHANGED_TO]-> (Wikitext)
+    4. (Wikitext) -[EDITED]-> (Wikitext)
+    5. (Wikipedian) -[AUTHORED]-> (Revision)
     """
     if verbose:
         logger.setLevel(logging.INFO)

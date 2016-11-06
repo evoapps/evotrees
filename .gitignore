@@ -1,5 +1,8 @@
 environment
 
+# data
+data/
+
 # pywikibot
 apicache/
 throttle.ctrl

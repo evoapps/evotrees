@@ -1,3 +1,4 @@
+import sqlite3
 import logging
 import hashlib
 from os import environ
@@ -5,6 +6,8 @@ from os import environ
 from py2neo import Graph
 import pywikibot
 import mwparserfromhell
+
+from .settings import SQLITE_PATH
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +18,10 @@ def connect_to_graph_db():
         raise AssertionError('must set NEO4J_PASSWORD environment variable')
 
     return Graph(password=password)
+
+
+def connect_to_sqlite_db():
+    return sqlite3.connect(SQLITE_PATH)
 
 
 def assert_uniqueness_constraint(graph, label, property_name):

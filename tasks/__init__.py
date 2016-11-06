@@ -4,6 +4,7 @@ from invoke import task
 
 # Import invoke tasks
 from .import_articles import import_articles
+from .import_qualities import import_qualities
 # Import Node objects. (Path likely to change.)
 from .import_articles import Revision, Wikitext
 # Import util functions for simple tasks written here.
