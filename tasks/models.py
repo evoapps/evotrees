@@ -26,7 +26,7 @@ class Revision(GraphObject):
     children = RelatedTo("Revision", "PARENT_OF")
 
     def __init__(self, revision_data):
-        self.revid = revision_data.get('revid')
+        self.revid = int(revision_data.get('revid'))
         self.quality = revision_data.get('quality')
 
 

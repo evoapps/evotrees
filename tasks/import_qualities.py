@@ -5,6 +5,7 @@ from unipath import Path
 from py2neo import Node, Subgraph
 import pandas
 
+from .models import Revision
 from .util import connect_to_graph_db, connect_to_sqlite_db
 from .settings import DATA_DIR, SQLITE_PATH
 
@@ -55,14 +56,18 @@ def import_qualities(ctx, force=False, download_only=False, verbose=False,
     if verbose:
         logger.setLevel(logging.INFO)
 
-    download_qualities(force=force, i_have_enough_space=i_have_enough_space,
-                       keep=keep)
+    try:
+        download_qualities(force=force, i_have_enough_space=i_have_enough_space,
+                           keep=keep)
+    except DBAlreadyExists:
+        logger.info('DB already exists, not downloading.')
 
     if download_only:
         return
 
     unlabeled_revids = get_revids_in_graph()
-    labels = select_qualities_by_revid(unlabeled_revids)
+    labels = select_qualities_by_revid(unlabeled_revids,
+                                       save_results='data/qualities.csv')
     update_revision_nodes_with_qualities(labels)
 
 
@@ -71,10 +76,10 @@ def download_qualities(force=False, i_have_enough_space=False, keep=False):
     bz2 = Path(DATA_DIR, 'article_qualities.tsv.bz2')
     tsv = Path(DATA_DIR, 'article_qualities.tsv')
 
-    # Try to prevent people from accidentally downloading too big a file.
+    # Try to prevent accidentally downloading too big a file.
     if not i_have_enough_space:
         try:
-            gb_available = int(run("df -g {} | awk '/\//{ print $4 }'").stdout)
+            gb_available = int(run("df -g . | awk '/\//{ print $4 }'").stdout)
             if gb_available < 100:
                 raise NotEnoughGBAvailable
         except:
@@ -101,27 +106,60 @@ def download_qualities(force=False, i_have_enough_space=False, keep=False):
 
 
 def get_revids_in_graph():
+    logger.info('Retrieving revids in graph.')
     graph = connect_to_graph_db()
     records = graph.data("MATCH (r:Revision) RETURN r.revid AS revid")
     revids = pandas.DataFrame(records)['revid'].tolist()
     return revids
 
 
-def select_qualities_by_revid(revids):
+def select_qualities_by_revid(revids, save_results=None, reset=False):
+    """Retrieve article qualities for a list of revisions.
+
+    Args:
+        revids (list of ints): Wikipedia article revision identifiers.
+        save_results (str): Path to csv to save query results. If None is
+            provided (the default) the results will not be saved. Useful
+            to prevent repeated queries.
+        reset (bool): Should the save_results file be overridden? Defaults
+            to False.
+    Return:
+        pandas.DataFrame of quality estimates for each revid that were found.
+    """
+    logger.info('Selecting qualities by revid.')
+
+    if save_results and Path(save_results).exists() and not reset:
+        logging.info('Found saved results for this query.')
+        return pandas.read_csv(save_results)
+
     q = "SELECT * FROM qualities WHERE rev_id IN ({})"
     revid_str = ','.join(map(str, revids))
+
     conn = connect_to_sqlite_db()
     qualities = pandas.read_sql_query(q.format(revid_str), conn)
     conn.close()
+
+    qualities.rename(columns={'rev_id': 'revid', 'weighted_sum': 'quality'},
+                     inplace=True)
+
+    if save_results:
+        logging.info('Saving this query as: {}'.format(save_results))
+        qualities.to_csv(save_results, index=False)
+
     return qualities
 
 
 def update_revision_nodes_with_qualities(qualities):
-    nodes = [Node('Revision', revid=int(rev.rev_id), quality=rev.weighted_sum)
-             for rev in qualities.itertuples()]
-    subgraph = Subgraph(nodes)
+    logger.info('Updating revisions with quality predictions.')
     graph = connect_to_graph_db()
-    graph.merge(subgraph)
+    transaction = graph.begin()
+
+    for rev_record in qualities.itertuples():
+        logger.info('Updating revision {}'.format(rev_record.revid))
+        revision = Revision(rev_record._asdict())
+        transaction.merge(revision, 'Revision', 'revid')
+
+    transaction.commit()
 
 
 class NotEnoughGBAvailable(Exception):
