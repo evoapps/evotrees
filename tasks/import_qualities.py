@@ -15,7 +15,7 @@ arg_docs = dict(
     force="Should files be redownloaded? Default is False.",
     download_only="Download qualities and return without doing anything else.",
     i_have_enough_space="Override the automatic check for available space.",
-    keep="Keep intermediate files after downloading and importing."
+    keep="Keep intermediate files after downloading and importing.",
 )
 
 
