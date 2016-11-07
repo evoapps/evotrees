@@ -1,40 +1,46 @@
-from py2neo import Node, Relationship
+from py2neo.ogm import GraphObject, Property, RelatedTo, RelatedFrom
 
 from .util import hash_wikitext, parse_wikitext
 
 
-class RevisionNode:
+class Article(GraphObject):
+    __primarykey__ = 'title'
+
+    title = Property()
+
+    revisions = RelatedTo("Revision", "CONTAINS")
+
+    def __init__(self, title):
+        # Convert any slugs to titles
+        self.title = title.replace('_', ' ')
+
+
+class Revision(GraphObject):
+    __primarykey__ = 'revid'
+
+    revid = Property()
+    quality = Property()
+
+    articles = RelatedFrom("Article", "CHANGED")
+    texts = RelatedTo("Wikitext", "CHANGED_TO")
+    children = RelatedTo("Revision", "PARENT_OF")
+
     def __init__(self, revision_data):
-        self.data = {k: revision_data[k] for k in self.REVISION_PROPERTIES}
-
-    def to_node(self):
-        return Node(self.NODE_LABEL, **self.data)
+        self.revid = revision_data.get('revid')
+        self.quality = revision_data.get('quality')
 
 
-class Revision(RevisionNode):
-    NODE_LABEL = 'Revision'
-    REVISION_PROPERTIES = ['revid']
+class Wikitext(GraphObject):
+    __primarykey__ = 'hash'
 
+    wikitext = Property()
+    hash = Property()
+    plaintext = Property()
 
-class Wikitext(RevisionNode):
-    NODE_LABEL = 'Wikitext'
-    REVISION_PROPERTIES = ['text']
+    revisions = RelatedFrom("Revision", "CHANGED_TO")
+    edits = RelatedTo("Wikitext", "EDIT")
 
-    def to_node(self):
-        # Rename text -> wikitext
-        self.data['wikitext'] = self.data.pop('text')
-
-        # Derive additional node attributes
-        self.data['hash'] = hash_wikitext(self.data['wikitext'])
-        self.data['plaintext'] = parse_wikitext(self.data['wikitext'])
-
-        return super().to_node()
-
-
-class Edit:
-    def __init__(self, parent, child):
-        self.parent = parent
-        self.child = child
-
-    def to_relationship(self):
-        return Relationship(self.parent, 'CHANGED_TO', self.child)
+    def __init__(self, revision_data):
+        self.wikitext = revision_data.get('text')
+        self.hash = hash_wikitext(self.wikitext)
+        self.plaintext = parse_wikitext(self.wikitext)

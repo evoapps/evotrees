@@ -1,11 +1,11 @@
 import logging
 
 from invoke import task
-from py2neo import Node, Relationship, ConstraintError
+from py2neo import Relationship, ConstraintError
 import unipath
 import pandas
 
-from .models import Revision, Wikitext
+from .models import Article, Revision, Wikitext
 from .util import (connect_to_graph_db, assert_uniqueness_constraint,
                    get_wiki_page)
 
@@ -61,8 +61,7 @@ def import_articles(ctx, names, title_col='title', clear_all=False,
     1. (Article) -[CONTAINS]-> (Revision)
     2. (Revision) -[PARENT_OF]-> (Revision)
     3. (Revision) -[CHANGED_TO]-> (Wikitext)
-    4. (Wikitext) -[EDITED]-> (Wikitext)
-    5. (Wikipedian) -[AUTHORED]-> (Revision)
+    4. (Wikitext) -[EDIT]-> (Wikitext)
     """
     if verbose:
         logger.setLevel(logging.INFO)
@@ -83,12 +82,7 @@ def import_articles(ctx, names, title_col='title', clear_all=False,
 
     for title in titles:
         logger.info('Starting to process article: {}'.format(title))
-
-        # Convert any slugs to titles
-        title = title.replace('_', ' ')
-
-        # Create a node for this article.
-        article = Node('Article', title=title)
+        article = Article(title)
 
         try:
             graph.create(article)
@@ -98,14 +92,15 @@ def import_articles(ctx, names, title_col='title', clear_all=False,
             # Right now existing articles are just being skipped:
             continue
 
-        # Create a root wikitext node
-        parent_wikitext = Wikitext(dict(text='')).to_node()
-        graph.create(parent_wikitext)
-
         # Create nodes for each of the article's revisions.
         # Also create preliminary relationships between article and revisions.
-        parent_node = None
+        first_revision = True
+        parent_revision = None
+        parent_wikitext = None
+
         for revision, wikitext in import_revisions_as_nodes(title):
+            logging.info('Processing revision {}'.format(revision.revid))
+
             # All revisions should be unique
             try:
                 graph.create(revision)
@@ -113,16 +108,23 @@ def import_articles(ctx, names, title_col='title', clear_all=False,
                 raise DuplicateRevisionError
 
             # Wikitexts might not be unique
-            graph.merge(wikitext)
+            graph.push(wikitext)
 
-            graph.create(Relationship(article, 'CONTAINS', revision))
-            graph.create(Relationship(revision, 'CHANGED_TO', wikitext))
-            graph.create(Relationship(parent_wikitext, 'EDIT', wikitext))
+            # Create article -> revision and revision -> wikitext relationships.
+            article.revisions.add(revision)
+            revision.texts.add(wikitext)
+            graph.push(article)
+            graph.push(revision)
 
-            if parent_node:
-                graph.create(Relationship(parent_node, 'PARENT_OF', revision))
+            if first_revision:
+                first_revision = False
+            else:
+                parent_revision.children.add(revision)
+                parent_wikitext.edits.add(wikitext)
+                graph.push(parent_revision)
+                graph.push(parent_wikitext)
 
-            parent_node = revision
+            parent_revision = revision
             parent_wikitext = wikitext
 
         logger.info('Finished processing article: {}'.format(title))
@@ -149,10 +151,10 @@ def import_revisions_as_nodes(title):
     """
     page = get_wiki_page(title)
     revisions = page.revisions(reverse=True, content=True)
-    for revision in revisions:
-        revision_node = Revision(revision).to_node()
-        wikitext_node = Wikitext(revision).to_node()
-        yield (revision_node, wikitext_node)
+    for revision_data in revisions:
+        revision = Revision(revision_data.__dict__)
+        wikitext = Wikitext(revision_data.__dict__)
+        yield (revision, wikitext)
 
 
 class DuplicateRevisionError(Exception):

@@ -18,6 +18,7 @@ arg_docs = dict(
     keep="Keep intermediate files after downloading and importing."
 )
 
+
 @task(help=arg_docs)
 def import_qualities(ctx, force=False, download_only=False, verbose=False,
                      i_have_enough_space=False, keep=False):
