@@ -17,12 +17,13 @@ arg_docs = dict(
     download_only="Download qualities and return without doing anything else.",
     i_have_enough_space="Override the automatic check for available space.",
     keep="Keep intermediate files after downloading and importing.",
+    reset_cache="Reset cache for querying qualities DB."
 )
 
 
 @task(help=arg_docs)
 def import_qualities(ctx, force=False, download_only=False, verbose=False,
-                     i_have_enough_space=False, keep=False):
+                     i_have_enough_space=False, keep=False, reset_cache=False):
     """Download machine predicted article qualities.
 
     When running for the first time, this will download an archived tsv
@@ -65,9 +66,16 @@ def import_qualities(ctx, force=False, download_only=False, verbose=False,
     if download_only:
         return
 
-    unlabeled_revids = get_revids_in_graph()
+    unlabeled_revids = get_unlabeled_revids_in_graph()
+    if len(unlabeled_revids) == 0:
+        raise NothingToUpdate('Qualities for these revids already in DB.')
+
     labels = select_qualities_by_revid(unlabeled_revids,
-                                       save_results='data/qualities.csv')
+                                       save_results='data/qualities.csv',
+                                       reset_cache=reset_cache)
+    if len(labels) == 0:
+        raise NothingToUpdate('Try resetting the cache with --reset-cache')
+
     update_revision_nodes_with_qualities(labels)
 
 
@@ -105,15 +113,17 @@ def download_qualities(force=False, i_have_enough_space=False, keep=False):
         tsv.remove()
 
 
-def get_revids_in_graph():
+def get_unlabeled_revids_in_graph():
     logger.info('Retrieving revids in graph.')
     graph = connect_to_graph_db()
-    records = graph.data("MATCH (r:Revision) RETURN r.revid AS revid")
+    records = graph.data("""MATCH (r:Revision)
+                            WHERE NOT EXISTS(r.quality)
+                            RETURN r.revid AS revid""")
     revids = pandas.DataFrame(records)['revid'].tolist()
     return revids
 
 
-def select_qualities_by_revid(revids, save_results=None, reset=False):
+def select_qualities_by_revid(revids, save_results=None, reset_cache=False):
     """Retrieve article qualities for a list of revisions.
 
     Args:
@@ -128,9 +138,10 @@ def select_qualities_by_revid(revids, save_results=None, reset=False):
     """
     logger.info('Selecting qualities by revid.')
 
-    if save_results and Path(save_results).exists() and not reset:
+    if save_results and Path(save_results).exists() and not reset_cache:
         logging.info('Found saved results for this query.')
-        return pandas.read_csv(save_results)
+        cache = pandas.read_csv(save_results)
+        return cache.ix[cache.revid.isin(revids)].reset_index(drop=True)
 
     q = "SELECT * FROM qualities WHERE rev_id IN ({})"
     revid_str = ','.join(map(str, revids))
@@ -167,4 +178,8 @@ class NotEnoughGBAvailable(Exception):
 
 
 class DBAlreadyExists(Exception):
+    pass
+
+
+class NothingToUpdate(Exception):
     pass
