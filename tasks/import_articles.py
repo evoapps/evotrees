@@ -98,32 +98,39 @@ def import_articles(ctx, names, title_col='title', clear_all=False,
         parent_revision = None
         parent_wikitext = None
 
+        rev_count = 1
         for revision, wikitext in import_revisions_as_nodes(title):
-            logging.info('Processing revision {}'.format(revision.revid))
+            logging.info('Processing revision #{}: {}'.format(rev_count,
+                                                              revision.revid))
+            transaction = graph.begin()
+
 
             # All revisions should be unique
             try:
-                graph.create(revision)
+                transation.create(revision)
             except ConstraintError:
                 raise DuplicateRevisionError
 
             # Wikitexts might not be unique
-            graph.push(wikitext)
+            transaction.merge(wikitext)
 
             # Create article -> revision and revision -> wikitext relationships.
             article.revisions.add(revision)
             revision.texts.add(wikitext)
-            graph.push(article)
-            graph.push(revision)
+
+            transaction.merge(article)
+            transaction.merge(revision)
 
             if first_revision:
                 first_revision = False
             else:
                 parent_revision.children.add(revision)
                 parent_wikitext.edits.add(wikitext)
-                graph.push(parent_revision)
-                graph.push(parent_wikitext)
+                transaction.merge(parent_revision)
+                transaction.merge(parent_wikitext)
 
+            transaction.commit()
+            rev_count += 1
             parent_revision = revision
             parent_wikitext = wikitext
 
